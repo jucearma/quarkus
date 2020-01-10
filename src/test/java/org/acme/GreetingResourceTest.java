@@ -17,7 +17,7 @@ public class GreetingResourceTest {
           .when().get("/hello/calculate")
           .then()
              .statusCode(200)
-             .body(CoreMatchers.is("100"));
+             .body(CoreMatchers.is("20"));
     }
 
     @Test
