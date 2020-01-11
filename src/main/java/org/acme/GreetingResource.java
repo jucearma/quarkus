@@ -1,10 +1,14 @@
 package org.acme;
 
 import java.net.URI;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import javax.annotation.security.RolesAllowed;
+import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import javax.persistence.EntityManager;
 import javax.transaction.Transactional;
@@ -19,6 +23,10 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+
+import org.eclipse.microprofile.jwt.Claim;
+import org.eclipse.microprofile.jwt.Claims;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.eclipse.microprofile.reactive.streams.operators.ReactiveStreams;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
@@ -28,11 +36,19 @@ import io.smallrye.reactive.messaging.annotations.Channel;
 import io.smallrye.reactive.messaging.annotations.Emitter;
 
 @Path("/hello")
+@RequestScoped
 public class GreetingResource {
 
     Logger logger = Logger.getLogger(GreetingResource.class);
 
     private AtomicInteger atomicInteger = new AtomicInteger();
+
+    @Inject
+    JsonWebToken token;
+
+    @Inject
+    @Claim(standard = Claims.sub)
+    String sub;
 
     @Inject
     GreetingService service;
@@ -82,11 +98,33 @@ public class GreetingResource {
     @POST
     @Transactional
     @Consumes(MediaType.APPLICATION_JSON)
-    @Path("/createDevRepository")    
+    @Path("/createDevRepository")
     public Response createDevRepository(@Valid Developer dev){
         developerRepository.create(dev);
         return Response.created(URI.create("/dev/"+dev.getId()))
         .build();
+    }
+
+    @GET
+    @Path("/getToken")
+    @RolesAllowed("Suscriber")
+    @Produces(MediaType.TEXT_PLAIN)
+    public String getToken() {
+        /* Hora vamos a agregarle RolesAllowed, solamente los usuarios que como grupo en su Token 
+           tienen Suscriber son los unicos que pueden acceder a este EndPoint
+        */
+        return token.getTokenID();
+    }
+
+    @GET
+    @Path("/getSub")
+    @RolesAllowed("Suscriber")
+    @Produces(MediaType.TEXT_PLAIN)
+    public String getSub() {
+        /* Hora vamos a agregarle RolesAllowed, solamente los usuarios que como grupo en su Token 
+           tienen Suscriber son los unicos que pueden acceder a este EndPoint
+        */
+        return sub;
     }
 
     @GET
@@ -189,6 +227,26 @@ public class GreetingResource {
         WorldClockHeaders worldClockHeaders = new WorldClockHeaders();
         worldClockHeaders.logger = "DEBUG";      
         return worldClockService.getNow(worldClockHeaders);
+    }
+
+    @GET
+    @Path("/getNowAsincrono")
+    @Produces(MediaType.APPLICATION_JSON)
+    public CompletionStage<List<WorldClock>> getNowAsincrono() {    
+        //WorldClock cet =  worldClockService.getNowAsincrono("cet");
+        //WorldClock gmt =  worldClockService.getNowAsincrono("gmt");
+        /* En este caso en vez e llevar a cabo los dos llamados uno por uno, mejor se hara un llamado 
+           en paralelo y cuando hayan terminado los dos llamados posterior a esto se genera la lista en paralelo        
+           Lo que haremos es devoler un CompletionStage y hacer un llamado en paralelo al gmt
+           cuando acaban de ejecutarse los dos 
+           Entonces, cuando el worldClockService.getNowAsincrono("cet") y el worldClockService.getNowAsincrono("gmt")
+           terminen de ejecutarse en paralelo lo que hago es ejecutar en otro Thread la concatenacion
+           de los dos y finalmente devolver el resultado al cliente. 
+           Como conclusion podemos observar que usando el Microprofile RestClient es muy sencillo empezar
+           a tratar de forma asincrona nuestros datos 
+           */
+        CompletionStage<WorldClock> cet =  worldClockService.getNowAsincrono("cet");
+        return cet.thenCombine(worldClockService.getNowAsincrono("gmt"), (cetResult, gmtResult) -> Arrays.asList(cetResult, gmtResult));
     }
 
     @GET
